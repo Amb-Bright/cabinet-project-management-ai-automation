@@ -32,3 +32,8 @@ Add the public-viewable Loom demonstration URL here after confirming its sharing
 
 ## Tools
 n8n · ClickUp · Gmail · OpenAI
+## 🎬 Video Demonstration
+
+Watch the 3-minute demonstration of the Cabinet Project Management & AI Automation Engine.
+
+[▶️ Watch Loom Demo](https://www.loom.com/share/135fed90aa07496b8c9eb47a199ba0e5)
