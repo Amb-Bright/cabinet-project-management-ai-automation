@@ -1,0 +1,658 @@
+{
+  "name": "CABINET PROJECT MANAGEMENT & AI AUTOMATION ENGINE",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -208,
+        -464
+      ],
+      "id": "00f317ef-53ef-442d-b83b-a99930455ee8",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "operation": "getAll",
+        "team": "REPLACE_WITH_YOUR_CLICKUP_TEAM_ID",
+        "space": "REPLACE_WITH_YOUR_CLICKUP_SPACE_ID",
+        "folderless": true,
+        "list": "REPLACE_WITH_YOUR_CLICKUP_LIST_ID",
+        "filters": {}
+      },
+      "type": "n8n-nodes-base.clickUp",
+      "typeVersion": 1,
+      "position": [
+        48,
+        -464
+      ],
+      "id": "441177a0-6cd7-453f-9b77-683fe61781b5",
+      "name": "Get many tasks"
+    },
+    {
+      "parameters": {
+        "jsCode": "const tasks = $input.all();\nconst now = Date.now();\n\nreturn tasks.map(item => {\n  const task = item.json;\n\n  const status = (task.status?.status || \"\").toLowerCase();\n\n  const lastUpdated = Number(task.date_updated);\n  const daysInactive = Number.isFinite(lastUpdated) && lastUpdated > 0\n    ? Math.floor((now - lastUpdated) / (24 * 60 * 60 * 1000))\n    : null;\n\n  const completedStatuses = [\n    \"complete\",\n    \"completed\",\n    \"closed\",\n    \"done\"\n  ];\n\n  const isCompleted =\n  completedStatuses.includes(status) ||\n  task.status?.type === \"closed\" ||\n  task.status?.type === \"done\";\n\n  const isStalled =\n    !isCompleted &&\n    daysInactive !== null &&\n    daysInactive >= 3;\n\n  return {\n    json: {\n      task_id: task.id,\n      task_name: task.name,\n      status: status,\n      days_inactive: daysInactive,\n      is_stalled: isStalled,\n      priority: task.priority?.priority || \"normal\",\n      assignee: task.assignees?.map(a => a.username).join(\", \") || \"Unassigned\",\n      task_url: task.url\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        -240
+      ],
+      "id": "e50f8679-74bc-41a5-acd3-fdc8744ec396",
+      "name": "Detect Stalled Tasks"
+    },
+    {
+      "parameters": {
+        "jsCode": "const tasks = $input.all();\n\nreturn tasks.map(item => {\n  const task = item.json;\n\n  return {\n    json: {\n      task_id: task.task_id,\n      task_name: task.task_name,\n      priority: task.priority,\n      status: task.status,\n      days_inactive: task.days_inactive,\n      assignee: task.assignee,\n      due_date: task.due_date,\n      task_url: task.task_url,\n\n      alert_message: `\nSTALLED TASK ALERT\n\nTask: ${task.task_name}\nStatus: ${task.status}\nPriority: ${task.priority}\nAssigned To: ${task.assignee}\nDays Inactive: ${task.days_inactive}\nDue Date: ${task.due_date}\n\nTask Link: ${task.task_url}\n\nACTION REQUIRED:\nPlease review this task and update its progress.\n`\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        752,
+        -160
+      ],
+      "id": "3164bd5a-d085-475a-877a-105dab763821",
+      "name": "Prepare Stalled Task Alert"
+    },
+    {
+      "parameters": {
+        "jsCode": "const tasks = $input.all();\nconst now = Date.now();\nconst hours48 = 48 * 60 * 60 * 1000;\n\nreturn tasks.map(item => {\n  const task = item.json;\n\n  const status = (task.status?.status || \"\").toLowerCase();\n  const priority = task.priority?.priority?.toLowerCase() || \"normal\";\n  const dueDate = task.due_date ? Number(task.due_date) : null;\n\n  const isCompleted = [\"complete\", \"completed\", \"closed\", \"cancelled\"]\n    .includes(status);\n\n  const isOverdue = !isCompleted && dueDate !== null && dueDate < now;\n\n  const dueSoon = !isCompleted &&\n    dueDate !== null &&\n    dueDate >= now &&\n    dueDate <= now + hours48;\n\n  const atRisk = [\"at risk\", \"on hold\", \"update required\"]\n    .includes(status);\n\n  let alertType = \"Normal\";\n\n  if (isOverdue) {\n    alertType = \"Overdue\";\n  } else if (atRisk) {\n    alertType = \"At Risk\";\n  } else if (dueSoon) {\n    alertType = \"Due Soon\";\n  } else if (!isCompleted && [\"high\", \"urgent\"].includes(priority)) {\n    alertType = \"High Priority\";\n  }\n\n  return {\n    json: {\n      task_id: task.id,\n      task_name: task.name,\n      status,\n      priority,\n      due_date: dueDate\n        ? new Date(dueDate).toISOString()\n        : null,\n      assignee: task.assignees?.map(a => a.username).join(\", \") || \"Unassigned\",\n      alert_type: alertType,\n      needs_attention: alertType !== \"Normal\",\n      task_url: task.url || \"\"\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        256,
+        -560
+      ],
+      "id": "db1354a4-5298-490c-baf4-037541a3f6be",
+      "name": "Detect Project Risks & Priority"
+    },
+    {
+      "parameters": {
+        "jsCode": "const tasks = $input.all().map(item => item.json);\n\nconst formatDate = (date) => {\n  if (!date) return \"Not specified\";\n  const d = new Date(date);\n  return isNaN(d.getTime())\n    ? \"Not specified\"\n    : d.toLocaleDateString(\"en-GB\", {\n        timeZone: \"Africa/Lagos\",\n        day: \"2-digit\",\n        month: \"short\",\n        year: \"numeric\"\n      });\n};\n\nconst taskDetails = tasks.map((task, index) => {\n  return `${index + 1}. ${task.task_name}\nPriority: ${task.priority}\nDue Date: ${formatDate(task.due_date)}\nAssigned To: ${task.assignee || \"Unassigned\"}\nAlert Type: ${task.alert_type}\nTask Link: ${task.task_url || \"Not available\"}`;\n}).join(\"\\n\\n\");\n\nconst message = `🚨 CABINET PROJECT MANAGEMENT ALERT\n\nProject: Modern Kitchen Cabinet Installation\n\nTasks Requiring Attention: ${tasks.length}\n\n${taskDetails}\n\nPlease review these tasks and take appropriate action.\n\nGenerated automatically by the Cabinet Project Management AI Automation Engine.`;\n\nreturn [{\n  json: {\n    project_name: \"Modern Kitchen Cabinet Installation\",\n    total_alerts: tasks.length,\n    alert_message: message,\n    generated_at: new Date().toISOString()\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        848,
+        -544
+      ],
+      "id": "5e18697c-ba48-4351-8f99-8f0e0d1d4fe2",
+      "name": "Prepare Project Risk Alert"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "5f3c14b8-775a-4e29-802f-6fd1df1710b3",
+              "leftValue": "={{ $json.needs_attention }}",
+              "rightValue": "True",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        528,
+        -544
+      ],
+      "id": "8486a571-1644-40e2-b97a-e749f3c555e6",
+      "name": "Filter Task Requiring Attention"
+    },
+    {
+      "parameters": {
+        "sendTo": "your-email@example.com",
+        "subject": "🚨 CABINET PROJECT MANAGEMENT | HIGH PRIORITY TASK ALERT",
+        "emailType": "text",
+        "message": "={{ $json.alert_message }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1152,
+        -560
+      ],
+      "id": "90ed38ee-c63b-4e0d-a60c-a88155eeaf7d",
+      "name": "Send Project Risk Alert"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "a12a0aad-3fec-4060-bd95-db74a660dfd0",
+              "leftValue": "={{ $json.is_stalled }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        480,
+        -160
+      ],
+      "id": "3b6d581d-83c6-466d-ae7b-5cf2692d75cd",
+      "name": "Filter Stalled Tasks"
+    },
+    {
+      "parameters": {
+        "sendTo": "your-email@example.com",
+        "subject": "🚨 STALLED TASK ALERT | Cabinet Project",
+        "emailType": "text",
+        "message": "={{ $json.alert_message }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1184,
+        -160
+      ],
+      "id": "7ddfc423-c953-4f95-a240-f95ca189f27c",
+      "name": "Send Stalled Task Alert"
+    },
+    {
+      "parameters": {
+        "jsCode": "const tasks = $input.all().map(item => item.json);\n\nconst now = Date.now();\nconst hours48 = 48 * 60 * 60 * 1000;\n\nconst completedStatuses = [\n  \"complete\", \"completed\", \"closed\", \"done\", \"cancelled\"\n];\n\nlet active = 0;\nlet completed = 0;\nlet overdue = 0;\nlet dueSoon = 0;\nlet highPriority = 0;\nlet atRisk = 0;\n\nconst attentionTasks = [];\n\nfor (const task of tasks) {\n  const status = (task.status?.status || \"\").toLowerCase();\n  const statusType = (task.status?.type || \"\").toLowerCase();\n  const priority = (task.priority?.priority || \"normal\").toLowerCase();\n\n  const dueDate = task.due_date\n    ? Number(task.due_date)\n    : null;\n\n  const isCompleted =\n    completedStatuses.includes(status) ||\n    statusType === \"closed\" ||\n    statusType === \"done\";\n\n  if (isCompleted) {\n    completed++;\n    continue;\n  }\n\n  active++;\n\n  const isOverdue = dueDate !== null && dueDate < now;\n  const isDueSoon =\n    dueDate !== null &&\n    dueDate >= now &&\n    dueDate <= now + hours48;\n\n  const isHighPriority = [\"high\", \"urgent\"].includes(priority);\n  const isAtRisk = [\"at risk\", \"on hold\", \"update required\"]\n    .includes(status);\n\n  if (isOverdue) overdue++;\n  if (isDueSoon) dueSoon++;\n  if (isHighPriority) highPriority++;\n  if (isAtRisk) atRisk++;\n\n  if (isOverdue || isDueSoon || isHighPriority || isAtRisk) {\n    const reasons = [];\n\n    if (isOverdue) reasons.push(\"Overdue\");\n    if (isDueSoon) reasons.push(\"Due Soon\");\n    if (isHighPriority) reasons.push(\"High Priority\");\n    if (isAtRisk) reasons.push(\"At Risk\");\n\n    attentionTasks.push(\n      `• ${task.name}\n  Assigned To: ${task.assignees?.map(a => a.username).join(\", \") || \"Unassigned\"}\n  Status: ${status}\n  Attention: ${reasons.join(\", \")}\n  Link: ${task.url || \"Not available\"}`\n    );\n  }\n}\n\nconst reportDate = new Date().toLocaleDateString(\"en-GB\", {\n  timeZone: \"Africa/Lagos\",\n  day: \"2-digit\",\n  month: \"long\",\n  year: \"numeric\"\n});\n\nconst report = `📋 DAILY CABINET PROJECT TEAM CHECK-IN\n\nDate: ${reportDate}\n\n📊 PROJECT OVERVIEW\nTotal Tasks: ${tasks.length}\nActive Tasks: ${active}\nCompleted Tasks: ${completed}\n\n⚠️ TASKS REQUIRING ATTENTION\nOverdue: ${overdue}\nDue Within 48 Hours: ${dueSoon}\nHigh Priority: ${highPriority}\nAt Risk: ${atRisk}\n\n📌 TASK DETAILS\n${attentionTasks.length\n  ? attentionTasks.join(\"\\n\\n\")\n  : \"No tasks currently require attention.\"}\n\nTEAM CHECK-IN QUESTIONS\n1. What tasks did you complete?\n2. What are you working on today?\n3. Are there any blockers or delays?\n4. Do you need assistance?\n\nPlease review your assigned tasks and provide updates.\n\nGenerated automatically by the Cabinet Project Management & AI Automation Engine.`;\n\nreturn [{\n  json: {\n    report_date: reportDate,\n    total_tasks: tasks.length,\n    active_tasks: active,\n    completed_tasks: completed,\n    overdue_tasks: overdue,\n    due_soon_tasks: dueSoon,\n    high_priority_tasks: highPriority,\n    at_risk_tasks: atRisk,\n    report_message: report\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        -48
+      ],
+      "id": "1072e25e-2976-4a7d-8b5f-c7486c6a4b0a",
+      "name": "Prepare Daily Team Check-in1"
+    },
+    {
+      "parameters": {
+        "sendTo": "your-email@example.com",
+        "subject": "📋 Daily Cabinet Project Team Check-in",
+        "emailType": "text",
+        "message": "={{ $json.report_message }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        448,
+        -32
+      ],
+      "id": "90262671-3e75-40ac-9029-311cb4a497ff",
+      "name": "Send Daily Team Check-in"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                1,
+                2,
+                3,
+                4,
+                5
+              ],
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -192,
+        -64
+      ],
+      "id": "8ddd7229-839e-4b6b-b629-1c89e1f29fe1",
+      "name": "Daily Check-in Trigger"
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "operation": "getAll",
+        "team": "REPLACE_WITH_YOUR_CLICKUP_TEAM_ID",
+        "space": "REPLACE_WITH_YOUR_CLICKUP_SPACE_ID",
+        "folderless": true,
+        "list": "REPLACE_WITH_YOUR_CLICKUP_LIST_ID",
+        "filters": {}
+      },
+      "type": "n8n-nodes-base.clickUp",
+      "typeVersion": 1,
+      "position": [
+        48,
+        -64
+      ],
+      "id": "bfb21f2c-c075-47da-bfee-d3fbbd370a3b",
+      "name": "Get Daily Tasks"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                5
+              ],
+              "triggerAtHour": 16
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -160,
+        144
+      ],
+      "id": "4edbfd49-fbbf-424f-afb4-fe00db262414",
+      "name": "Weekly Team Check-in Trigger"
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "operation": "getAll",
+        "team": "REPLACE_WITH_YOUR_CLICKUP_TEAM_ID",
+        "space": "REPLACE_WITH_YOUR_CLICKUP_SPACE_ID",
+        "folderless": true,
+        "list": "REPLACE_WITH_YOUR_CLICKUP_LIST_ID",
+        "filters": {}
+      },
+      "type": "n8n-nodes-base.clickUp",
+      "typeVersion": 1,
+      "position": [
+        96,
+        128
+      ],
+      "id": "99564209-989c-4074-b09d-0548293db82a",
+      "name": "Get Weekly Tasks"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst tasks = $input.all().map(item => item.json);\nconst now = new Date();\n\n// Reporting period: Monday 00:00 to Friday 16:00,\n// using the workflow timezone (Africa/Lagos).\nconst today = $now.setZone(\"Africa/Lagos\");\nconst weekStart = today.startOf(\"week\");\nconst weekEnd = today;\n\nconst completedStatuses = [\"complete\", \"completed\", \"closed\", \"done\"];\n\nconst isCompleted = task => {\n  const status = (task.status?.status || \"\").toLowerCase();\n  return completedStatuses.includes(status) ||\n    task.status?.type === \"closed\" ||\n    task.status?.type === \"done\";\n};\n\nconst completedThisWeek = tasks.filter(task => {\n  const completedAt = Number(task.date_closed || task.date_done);\n  if (!isCompleted(task) || !completedAt) return false;\n\n  return completedAt >= weekStart.toMillis() &&\n         completedAt <= weekEnd.toMillis();\n});\n\nconst activeTasks = tasks.filter(task => !isCompleted(task));\n\nconst overdueTasks = activeTasks.filter(task => {\n  const due = Number(task.due_date);\n  return due > 0 && due < now.getTime();\n});\n\nconst highPriorityTasks = activeTasks.filter(task => {\n  const priority = (task.priority?.priority || \"\").toLowerCase();\n  return [\"high\", \"urgent\"].includes(priority);\n});\n\nconst stalledTasks = activeTasks.filter(task => {\n  const updated = Number(task.date_updated);\n  return updated > 0 &&\n    now.getTime() - updated >= 3 * 24 * 60 * 60 * 1000;\n});\n\nconst formatTask = task => {\n  const name = task.name || \"Unnamed task\";\n  const assignee = task.assignees?.map(a => a.username).join(\", \") || \"Unassigned\";\n  return `- ${name} (Assigned to: ${assignee})`;\n};\n\nconst report = [\n  \"WEEKLY CABINET PROJECT TEAM CHECK-IN\",\n  `Week beginning: ${weekStart.toFormat(\"dd LLL yyyy\")}`,\n  `Report generated: ${today.toFormat(\"dd LLL yyyy, h:mm a\")}`,\n  \"\",\n  \"PROJECT OVERVIEW\",\n  `Total tasks retrieved: ${tasks.length}`,\n  `Active tasks: ${activeTasks.length}`,\n  `Completed this week: ${completedThisWeek.length}`,\n  `Overdue tasks: ${overdueTasks.length}`,\n  `High-priority active tasks: ${highPriorityTasks.length}`,\n  `Stalled tasks (3+ days inactive): ${stalledTasks.length}`,\n  \"\",\n  \"COMPLETED THIS WEEK\",\n  ...(completedThisWeek.length\n    ? completedThisWeek.map(formatTask)\n    : [\"No completed tasks recorded this week.\"]),\n  \"\",\n  \"TASKS REQUIRING ATTENTION\",\n  ...(overdueTasks.length\n    ? overdueTasks.map(formatTask)\n    : [\"No overdue tasks.\"]),\n  \"\",\n  \"STALLED TASKS\",\n  ...(stalledTasks.length\n    ? stalledTasks.map(formatTask)\n    : [\"No stalled tasks.\"]),\n  \"\",\n  \"NEXT STEPS\",\n  \"Review overdue and high-priority tasks.\",\n  \"Follow up with owners of stalled tasks.\",\n  \"Confirm priorities for the coming week.\"\n].join(\"\\n\");\n\nreturn [{\n  json: {\n    report_type: \"weekly\",\n    report_date: today.toISODate(),\n    total_tasks: tasks.length,\n    active_tasks: activeTasks.length,\n    completed_this_week: completedThisWeek.length,\n    overdue_tasks: overdueTasks.length,\n    high_priority_tasks: highPriorityTasks.length,\n    stalled_tasks: stalledTasks.length,\n    weekly_report: report\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        304,
+        160
+      ],
+      "id": "8457b374-ace3-470e-b598-273e6a61c55b",
+      "name": "Prepare Weekly Team Summary"
+    },
+    {
+      "parameters": {
+        "sendTo": "your-email@example.com",
+        "subject": "📋 Weekly Cabinet Project Team Progress Report",
+        "emailType": "text",
+        "message": "={{ $json.weekly_report }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        656,
+        96
+      ],
+      "id": "064f6555-5b95-4161-a72e-db3918a7c26c",
+      "name": "Send Weekly Team Check-in"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_IMPORTED_SUBWORKFLOW_ID",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "task_id": "={{ $json.task_id }}"
+          },
+          "matchingColumns": [
+            "task_id"
+          ],
+          "schema": [
+            {
+              "id": "task_id",
+              "displayName": "task_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        912,
+        -368
+      ],
+      "id": "f93f56cf-7710-4bc2-9419-d902e092e2f6",
+      "name": "Run AI Cabinet Design Review."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a18cc075-ffe8-4917-98a1-e6f1d9a370a1",
+              "name": "task_id",
+              "value": "={{ $json.id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        592,
+        -384
+      ],
+      "id": "c6460150-7571-4941-a2ea-2738faf95b2c",
+      "name": "Prepare Design Review Request"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "35beb7c4-94b2-4a3a-a7ba-8961b7b54c3d",
+              "leftValue": "={{ $json.name }}",
+              "rightValue": "Design Review",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            },
+            {
+              "id": "2ef92b1f-d7df-440b-bae0-1e1eb243bbc4",
+              "leftValue": "={{ String($json.custom_fields?.find(f => f.name === \"Design Review Status\")?.value ?? \"\") }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "empty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        320,
+        -384
+      ],
+      "id": "9b4e45bc-f020-47f8-884a-a04509ceb349",
+      "name": "Filter Design Tasks for AI Review"
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get many tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get many tasks": {
+      "main": [
+        [
+          {
+            "node": "Detect Project Risks & Priority",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Detect Stalled Tasks",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Filter Design Tasks for AI Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detect Stalled Tasks": {
+      "main": [
+        [
+          {
+            "node": "Filter Stalled Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Stalled Task Alert": {
+      "main": [
+        [
+          {
+            "node": "Send Stalled Task Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detect Project Risks & Priority": {
+      "main": [
+        [
+          {
+            "node": "Filter Task Requiring Attention",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Project Risk Alert": {
+      "main": [
+        [
+          {
+            "node": "Send Project Risk Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Task Requiring Attention": {
+      "main": [
+        [
+          {
+            "node": "Prepare Project Risk Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Stalled Tasks": {
+      "main": [
+        [
+          {
+            "node": "Prepare Stalled Task Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Daily Team Check-in1": {
+      "main": [
+        [
+          {
+            "node": "Send Daily Team Check-in",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily Check-in Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Daily Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Daily Tasks": {
+      "main": [
+        [
+          {
+            "node": "Prepare Daily Team Check-in1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Weekly Team Check-in Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Weekly Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Weekly Tasks": {
+      "main": [
+        [
+          {
+            "node": "Prepare Weekly Team Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Weekly Team Summary": {
+      "main": [
+        [
+          {
+            "node": "Send Weekly Team Check-in",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run AI Cabinet Design Review.": {
+      "main": [
+        []
+      ]
+    },
+    "Prepare Design Review Request": {
+      "main": [
+        [
+          {
+            "node": "Run AI Cabinet Design Review.",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Design Tasks for AI Review": {
+      "main": [
+        [
+          {
+            "node": "Prepare Design Review Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  }
+}

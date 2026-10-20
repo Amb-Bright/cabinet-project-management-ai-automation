@@ -1,0 +1,228 @@
+{
+  "name": "SUB-WORKFLOW – AI CABINET DESIGN REVIEW",
+  "nodes": [
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "operation": "get",
+        "id": "={{ $json.task_id }}",
+        "includeMarkdownDescription": true
+      },
+      "type": "n8n-nodes-base.clickUp",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        -96
+      ],
+      "id": "d02c551f-f316-448a-a7c6-cb5f6193069a",
+      "name": "Get Cabinet Design Task"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.description }}",
+        "messages": {
+          "messageValues": [
+            {
+              "message": "You are an AI-assisted cabinet design review assistant supporting a professional cabinet manufacturing and installation team.  Analyze the cabinet design brief provided by the user.  Check for: 1. Missing or unverified measurements. 2. Missing material specifications. 3. Door and drawer clearance concerns. 4. Plumbing and electrical coordination issues. 5. Installation and production risks. 6. Missing client approval requirements.  Return a structured review containing: - Design Summary - Identified Issues - Risk Level: Low, Medium, or High - Recommended Corrective Actions - Questions for the Design Team - Review Decision: Needs Human Review or Ready for Human Verification  Never invent measurements, claim a design is technically certified, or approve production automatically. Flag missing information for qualified human verification.  Keep the review professional, concise, and actionable."
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        240,
+        -160
+      ],
+      "id": "b997eafe-91ce-4d47-ba13-cfe495c78898",
+      "name": "AI Cabinet Design Reviewer"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-5-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        272,
+        48
+      ],
+      "id": "54140b50-7089-4207-802c-eca2e17ddeb2",
+      "name": "OpenAI Chat Model"
+    },
+    {
+      "parameters": {
+        "sendTo": "your-email@example.com",
+        "subject": "⚠️ Human Review Required – Kitchen Cabinet Design",
+        "emailType": "text",
+        "message": "={{ $json.text }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        512,
+        -64
+      ],
+      "id": "26985d93-bed9-4290-b45d-b9b872e9166e",
+      "name": "Send AI Design Review for Approval"
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "comment",
+        "commentOn": "task",
+        "id": "={{ $('Receive Cabinet Design Review Request').first().json.task_id }}",
+        "commentText": "={{ \"AI DESIGN REVIEW COMPLETED\\n\\nStatus: PENDING HUMAN REVIEW\\n\\n\" + $('AI Cabinet Design Reviewer').first().json.text + \"\\n\\nIMPORTANT: This AI review is advisory only. A qualified reviewer must verify the design and record an approval decision before production.\" }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.clickUp",
+      "typeVersion": 1,
+      "position": [
+        736,
+        -32
+      ],
+      "id": "eab708b7-b04f-4e82-8625-ebe48fa3509f",
+      "name": "Create a comment"
+    },
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "task_id"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -368,
+        -112
+      ],
+      "id": "a4244600-10fb-491f-900d-7b37f3ffcccd",
+      "name": "Receive Cabinet Design Review Request"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "f94e6f5e-725d-4be0-a82d-b133626dfd15",
+              "leftValue": "={{ $json.custom_fields?.find(f => f.name === \"Design Review Status\")?.value ?? \"\" }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "empty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        32,
+        -80
+      ],
+      "id": "5abe683b-03c9-4808-80c9-435dad05a63c",
+      "name": "Check If Design Needs AI Review"
+    }
+  ],
+  "connections": {
+    "Get Cabinet Design Task": {
+      "main": [
+        [
+          {
+            "node": "Check If Design Needs AI Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Cabinet Design Reviewer": {
+      "main": [
+        [
+          {
+            "node": "Send AI Design Review for Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Cabinet Design Reviewer",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send AI Design Review for Approval": {
+      "main": [
+        [
+          {
+            "node": "Create a comment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Receive Cabinet Design Review Request": {
+      "main": [
+        [
+          {
+            "node": "Get Cabinet Design Task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check If Design Needs AI Review": {
+      "main": [
+        [
+          {
+            "node": "AI Cabinet Design Reviewer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  }
+}
